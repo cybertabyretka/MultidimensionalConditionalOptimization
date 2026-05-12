@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            output: mdo-windows.exe
+          - os: ubuntu-latest
+            output: mdo-linux
+          - os: macos-latest
+            output: mdo-darwin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up C++ compiler
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y g++
+
+      - name: Set up C++ compiler
+        if: runner.os == 'macOS'
+        run: |
+          # macOS has clang by default
+          echo "Using clang"
+
+      - name: Set up C++ compiler
+        if: runner.os == 'Windows'
+        run: |
+          echo "Using g++"
+
+      - name: Build on Windows
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          g++ -std=c++20 -I . -Wall -Wextra -O2 -static app/main.cpp utils/grid_generator.cpp newton_optimizer.cpp -o mdo-windows.exe
+
+      - name: Build on Ubuntu
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          g++ -std=c++20 -I . -Wall -Wextra -O2 -static app/main.cpp utils/grid_generator.cpp newton_optimizer.cpp -o mdo-linux
+
+      - name: Build on macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          g++ -std=c++20 -I . -Wall -Wextra -O2 -static-libstdc++ app/main.cpp utils/grid_generator.cpp newton_optimizer.cpp -o mdo-darwin
+
+      - name: Check Windows artifact
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          echo "= list windows artifact ="
+          ls -la mdo-windows.exe
+
+      - name: Check Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          echo "= list linux artifact ="
+          ls -la mdo-linux
+
+      - name: Check macOS artifact
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          echo "= list macos artifact ="
+          ls -la mdo-darwin
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            mdo-windows.exe
+            mdo-linux
+            mdo-darwin
