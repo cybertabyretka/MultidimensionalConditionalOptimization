@@ -13,35 +13,32 @@
 
 struct Monomial {
     double coeff = 0.0;
-    std::unordered_map<std::string, int> powers; // например: x^2 y^1
+    std::unordered_map<std::string, int> powers;
 };
 
-static bool is_ident_start(char c) {
+inline bool is_ident_start(char c) {
     return std::isalpha(static_cast<unsigned char>(c)) || c == '_';
 }
 
-static bool is_ident_char(char c) {
+inline bool is_ident_char(char c) {
     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
 }
 
-static std::string remove_spaces(std::string s) {
+inline std::string remove_spaces(std::string s) {
     s.erase(
-        std::remove_if(s.begin(), s.end(),
-                       [](unsigned char ch) { return std::isspace(ch); }),
+        std::remove_if(s.begin(), s.end(), [](unsigned char ch) { return std::isspace(ch); }),
         s.end()
     );
     return s;
 }
 
-// Делит выражение на термы по + и -, не трогая знаки в степенях вида ^{...}
-static std::vector<std::string> split_terms(const std::string& expr) {
+inline std::vector<std::string> split_terms(const std::string& expr) {
     std::vector<std::string> terms;
     std::string current;
     int brace_depth = 0;
 
     for (size_t i = 0; i < expr.size(); ++i) {
         char c = expr[i];
-
         if (c == '{') {
             ++brace_depth;
             current.push_back(c);
@@ -52,13 +49,12 @@ static std::vector<std::string> split_terms(const std::string& expr) {
             current.push_back(c);
             continue;
         }
-
         if ((c == '+' || c == '-') && brace_depth == 0) {
             if (!current.empty()) {
                 terms.push_back(current);
                 current.clear();
             }
-            current.push_back(c); // знак принадлежит следующему терму
+            current.push_back(c);
         } else {
             current.push_back(c);
         }
@@ -71,16 +67,15 @@ static std::vector<std::string> split_terms(const std::string& expr) {
     return terms;
 }
 
-// Поддержка ^3 и ^{3}
-static int parse_exponent(const std::string& s, size_t& i) {
+inline int parse_exponent(const std::string& s, size_t& i) {
     if (i >= s.size() || s[i] != '^') {
         return 1;
     }
 
-    ++i; // пропускаем '^'
+    ++i;
 
     if (i < s.size() && s[i] == '{') {
-        ++i; // пропускаем '{'
+        ++i;
         size_t start = i;
         while (i < s.size() && s[i] != '}') {
             ++i;
@@ -89,7 +84,7 @@ static int parse_exponent(const std::string& s, size_t& i) {
             throw LaTeXParserException("Invalid exponent syntax: missing '}'");
         }
         std::string exp_str = s.substr(start, i - start);
-        ++i; // пропускаем '}'
+        ++i;
         try {
             return std::stoi(exp_str);
         } catch (...) {
@@ -117,7 +112,7 @@ static int parse_exponent(const std::string& s, size_t& i) {
     }
 }
 
-static Monomial parse_term(const std::string& raw_term) {
+inline Monomial parse_term(const std::string& raw_term) {
     if (raw_term.empty()) {
         throw LaTeXParserException("Empty term");
     }
@@ -127,14 +122,15 @@ static Monomial parse_term(const std::string& raw_term) {
 
     int sign = 1;
     if (s[i] == '+' || s[i] == '-') {
-        if (s[i] == '-') sign = -1;
+        if (s[i] == '-') {
+            sign = -1;
+        }
         ++i;
     }
 
     Monomial m;
     m.coeff = 1.0;
 
-    // Коэффициент в начале терма, например 3x^2y или 0.5ab
     if (i < s.size() && (std::isdigit(static_cast<unsigned char>(s[i])) || s[i] == '.')) {
         size_t consumed = 0;
         try {
@@ -145,17 +141,14 @@ static Monomial parse_term(const std::string& raw_term) {
         i += consumed;
     }
 
-    // Множители-переменные
     while (i < s.size()) {
         if (s[i] == '*') {
-            ++i; // необязательный знак умножения
+            ++i;
             continue;
         }
 
         if (!is_ident_start(s[i])) {
-            throw LaTeXParserException(
-                std::string("Unexpected character in term: ") + s[i]
-            );
+            throw LaTeXParserException(std::string("Unexpected character in term: ") + s[i]);
         }
 
         size_t start = i;
@@ -177,7 +170,7 @@ static Monomial parse_term(const std::string& raw_term) {
     return m;
 }
 
-static std::vector<Monomial> parse_polynomial(const std::string& expr) {
+inline std::vector<Monomial> parse_polynomial(const std::string& expr) {
     std::string s = remove_spaces(expr);
     std::vector<Monomial> terms;
 
@@ -190,12 +183,48 @@ static std::vector<Monomial> parse_polynomial(const std::string& expr) {
     return terms;
 }
 
+inline std::vector<std::string> extract_variables_in_order(const std::string& expr) {
+    std::string s = remove_spaces(expr);
+    std::vector<std::string> variables;
+
+    for (size_t i = 0; i < s.size();) {
+        if (!is_ident_start(s[i])) {
+            ++i;
+            continue;
+        }
+
+        if ((s[i] == 'e' || s[i] == 'E') && i > 0) {
+            const char prev = s[i - 1];
+            if ((std::isdigit(static_cast<unsigned char>(prev)) || prev == '.') && i + 1 < s.size()) {
+                const char next = s[i + 1];
+                if (std::isdigit(static_cast<unsigned char>(next)) || next == '+' || next == '-') {
+                    ++i;
+                    continue;
+                }
+            }
+        }
+
+        size_t start = i;
+        ++i;
+        while (i < s.size() && is_ident_char(s[i])) {
+            ++i;
+        }
+
+        std::string var = s.substr(start, i - start);
+        if (std::find(variables.begin(), variables.end(), var) == variables.end()) {
+            variables.push_back(var);
+        }
+    }
+
+    return variables;
+}
+
 using MultiVarFunction = std::function<double(const std::vector<double>&)>;
 
-// variables — порядок переменных, например {"x","y","z"}
-// values для вычисления передаются в том же порядке: {x, y, z}
-MultiVarFunction parse_function(const std::string& latex_expr,
-                                const std::vector<std::string>& variables) {
+inline MultiVarFunction parse_function(
+    const std::string& latex_expr,
+    const std::vector<std::string>& variables
+) {
     std::vector<Monomial> terms = parse_polynomial(latex_expr);
 
     std::unordered_map<std::string, size_t> var_index;
@@ -203,9 +232,7 @@ MultiVarFunction parse_function(const std::string& latex_expr,
         var_index[variables[i]] = i;
     }
 
-    return [terms = std::move(terms),
-            var_index = std::move(var_index),
-            variables](const std::vector<double>& values) -> double {
+    return [terms = std::move(terms), var_index = std::move(var_index), variables](const std::vector<double>& values) -> double {
         if (values.size() != variables.size()) {
             throw std::invalid_argument("Wrong number of variable values");
         }
@@ -214,7 +241,6 @@ MultiVarFunction parse_function(const std::string& latex_expr,
 
         for (const auto& term : terms) {
             double term_value = term.coeff;
-
             for (const auto& [var, exp] : term.powers) {
                 auto it = var_index.find(var);
                 if (it == var_index.end()) {
@@ -222,7 +248,6 @@ MultiVarFunction parse_function(const std::string& latex_expr,
                 }
                 term_value *= std::pow(values[it->second], exp);
             }
-
             result += term_value;
         }
 

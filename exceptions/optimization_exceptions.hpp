@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdexcept>
+#include <string>
 
 class OptimizationError : public std::runtime_error {
 public:
@@ -10,18 +11,24 @@ public:
 
 class InputOptimizationError : public OptimizationError {
 public:
-    explicit InputOptimizationError(const std::string& detail)
-        : OptimizationError("Input Optimization Error: " + detail) {}
+    explicit InputOptimizationError(const std::string& message)
+        : OptimizationError("Input Optimization Error: " + message) {}
 };
 
 class ConvergenceError : public OptimizationError {
 public:
-    explicit ConvergenceError(const std::string& detail)
-        : OptimizationError("Convergence Error: " + detail) {}
+    explicit ConvergenceError(const std::string& message)
+        : OptimizationError("Convergence Error: " + message) {}
 };
 
 class ObjectiveEvaluationError : public OptimizationError {
 public:
-    explicit ObjectiveEvaluationError(const std::string& detail)
-        : OptimizationError("Objective Evaluation Error: " + detail) {}
+    explicit ObjectiveEvaluationError(const std::string& message)
+        : OptimizationError("Objective Evaluation Optimiazation Error: " + message) {}
+};
+
+class ProjectionError : public OptimizationError {
+public:
+    explicit ProjectionError(const std::string& message)
+        : OptimizationError("Projection Error: " + message) {}
 };
