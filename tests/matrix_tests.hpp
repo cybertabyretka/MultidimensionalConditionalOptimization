@@ -61,7 +61,7 @@ void test_matrix_normal() {
         Matrix<double> sum = m + m2;
         if (sum.at(0, 0) != 2.0 || sum.at(1, 2) != 7.0)
             throw std::logic_error("Matrix addition failed");
-    } catch (const std::exception& e) {
+    } catch (const std::logic_error& e) {
         print_test_failed("Matrix_Normal", e.what());
     }
 }
@@ -113,7 +113,7 @@ void test_matrix_edge_cases() {
         // Case 6: Non-square matrix symmetry check
         if (m1.is_symmetric())
             throw std::logic_error("Non-square matrix should not be symmetric");
-    } catch (const std::exception& e) {
+    } catch (const std::logic_error& e) {
         print_test_failed("Matrix_EdgeCases", e.what());
     }
 }

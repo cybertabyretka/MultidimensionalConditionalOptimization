@@ -3,9 +3,12 @@
 #include <string>
 
 #include "app/parser_utils.hpp"
+
 #include "exceptions/config_exceptions.hpp"
+
 #include "projected_gradient_configs.hpp"
-#include "exceptions/projected_gradient_exceptions.hpp"
+
+#include "exceptions/optimization_exceptions.hpp"
 
 inline void set_default_projected_gradient_numeric_config(ProjectedGradientNumericConfig& cfg) {
     cfg.max_iter = 50;

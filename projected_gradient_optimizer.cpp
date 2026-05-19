@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <stdexcept>
 
 #include "projected_gradient_configs.hpp"
 #include "projected_gradient_optimizer.hpp"
@@ -17,7 +18,286 @@
 #include "exceptions/vector_matrix_exceptions.hpp"
 #include "exceptions/optimization_exceptions.hpp"
 #include "exceptions/intervals_exceptions.hpp"
-#include "exceptions/projected_gradient_exceptions.hpp"
+
+namespace {
+
+struct Halfspace {
+    Vector<double> normal;
+    double rhs{};
+};
+
+struct ConstraintRep {
+    Vector<double> normal;
+    double rhs{};
+};
+
+Vector<double> project_onto_halfspace(const Vector<double>& y, const Halfspace& h) {
+    const double denom = h.normal.dot(h.normal);
+    if (denom <= 0.0) {
+        throw InputOptimizationError("Invalid linear constraint: zero normal vector");
+    }
+
+    const double violation = h.normal.dot(y) - h.rhs;
+    if (violation <= 0.0) {
+        return y;
+    }
+
+    return y - h.normal * (violation / denom);
+}
+
+Halfspace make_halfspace_from_constraint(const LinearConstraint& c) {
+    if (c.greater_equal) {
+        return Halfspace{c.coefficients * -1.0, -c.rhs};
+    }
+    return Halfspace{c.coefficients, c.rhs};
+}
+
+ConstraintRep to_constraint_rep(const LinearConstraint& c) {
+    if (c.greater_equal) {
+        return ConstraintRep{c.coefficients * -1.0, -c.rhs};
+    }
+    return ConstraintRep{c.coefficients, c.rhs};
+}
+
+std::vector<ConstraintRep> collect_constraints(const ProjectedGradientOptimizerConfig& cfg, size_t dim) {
+    std::vector<ConstraintRep> constraints;
+
+    if (!cfg.domain.lower_bound.empty()) {
+        for (size_t i = 0; i < dim; ++i) {
+            Vector<double> upper_normal(dim, 0.0);
+            upper_normal[i] = 1.0;
+            constraints.push_back(ConstraintRep{upper_normal, cfg.domain.upper_bound[i]});
+
+            Vector<double> lower_normal(dim, 0.0);
+            lower_normal[i] = -1.0;
+            constraints.push_back(ConstraintRep{lower_normal, -cfg.domain.lower_bound[i]});
+        }
+    }
+
+    for (const auto& c : cfg.linear_constraints) {
+        constraints.push_back(to_constraint_rep(c));
+    }
+
+    return constraints;
+}
+
+std::vector<size_t> active_constraint_indices(
+    const std::vector<ConstraintRep>& constraints,
+    const Vector<double>& x,
+    double tol
+) {
+    std::vector<size_t> active;
+    for (size_t i = 0; i < constraints.size(); ++i) {
+        const double slack = constraints[i].normal.dot(x) - constraints[i].rhs;
+        if (std::abs(slack) <= tol) {
+            active.push_back(i);
+        }
+    }
+    return active;
+}
+
+bool satisfies_all_constraints(
+    const std::vector<ConstraintRep>& constraints,
+    const Vector<double>& x,
+    double tol
+) {
+    for (const auto& c : constraints) {
+        if (c.normal.dot(x) - c.rhs > tol) {
+            return false;
+        }
+    }
+    return true;
+}
+
+Matrix<double> build_active_matrix(
+    const std::vector<ConstraintRep>& constraints,
+    const std::vector<size_t>& indices,
+    size_t dim
+) {
+    Matrix<double> A(indices.size(), dim, 0.0);
+    for (size_t i = 0; i < indices.size(); ++i) {
+        const auto& n = constraints[indices[i]].normal;
+        for (size_t j = 0; j < dim; ++j) {
+            A.at(i, j) = n[j];
+        }
+    }
+    return A;
+}
+
+std::vector<Vector<double>> nullspace_basis(Matrix<double> A, double tol) {
+    const size_t m = A.rows();
+    const size_t n = A.cols();
+    std::vector<int> pivot_row_for_col(n, -1);
+    size_t row = 0;
+
+    for (size_t col = 0; col < n && row < m; ++col) {
+        size_t pivot = row;
+        double best = std::abs(A.at(row, col));
+        for (size_t r = row + 1; r < m; ++r) {
+            const double cand = std::abs(A.at(r, col));
+            if (cand > best) {
+                best = cand;
+                pivot = r;
+            }
+        }
+
+        if (best <= tol) {
+            continue;
+        }
+
+        if (pivot != row) {
+            for (size_t j = 0; j < n; ++j) {
+                std::swap(A.at(row, j), A.at(pivot, j));
+            }
+        }
+
+        const double pivot_val = A.at(row, col);
+        for (size_t j = 0; j < n; ++j) {
+            A.at(row, j) /= pivot_val;
+        }
+
+        for (size_t r = 0; r < m; ++r) {
+            if (r == row) {
+                continue;
+            }
+            const double factor = A.at(r, col);
+            if (std::abs(factor) <= tol) {
+                continue;
+            }
+            for (size_t j = 0; j < n; ++j) {
+                A.at(r, j) -= factor * A.at(row, j);
+            }
+        }
+
+        pivot_row_for_col[col] = static_cast<int>(row);
+        ++row;
+    }
+
+    std::vector<Vector<double>> basis;
+    for (size_t free_col = 0; free_col < n; ++free_col) {
+        if (pivot_row_for_col[free_col] != -1) {
+            continue;
+        }
+
+        Vector<double> z(n, 0.0);
+        z[free_col] = 1.0;
+        for (size_t col = 0; col < n; ++col) {
+            const int pivot_row = pivot_row_for_col[col];
+            if (pivot_row >= 0) {
+                z[col] = -A.at(static_cast<size_t>(pivot_row), free_col);
+            }
+        }
+        basis.push_back(z);
+    }
+
+    return basis;
+}
+
+std::vector<std::vector<size_t>> generate_subsets(const std::vector<size_t>& items, size_t k) {
+    std::vector<std::vector<size_t>> subsets;
+    std::vector<size_t> current;
+
+    std::function<void(size_t)> dfs = [&](size_t pos) {
+        if (current.size() == k) {
+            subsets.push_back(current);
+            return;
+        }
+        if (pos == items.size()) {
+            return;
+        }
+
+        current.push_back(items[pos]);
+        dfs(pos + 1);
+        current.pop_back();
+        dfs(pos + 1);
+    };
+
+    dfs(0);
+    return subsets;
+}
+
+bool kkt_minimum_check(
+    const std::function<double(const Vector<double>&)>& objective,
+    const ProjectedGradientOptimizerConfig& config,
+    const Vector<double>& x,
+    const std::vector<ConstraintRep>& constraints
+) {
+    const double feas_tol = std::max(config.numeric.grad_tol, 1e-8);
+    if (!satisfies_all_constraints(constraints, x, feas_tol)) {
+        return false;
+    }
+
+    const Vector<double> g = numerical_gradient(objective, x, config.numeric.gradient_step);
+    const std::vector<size_t> active = active_constraint_indices(constraints, x, feas_tol);
+
+    bool kkt_ok = false;
+    if (active.empty()) {
+        kkt_ok = g.norm() <= config.numeric.grad_tol;
+    } else {
+        const size_t dim = x.size();
+        const size_t max_k = std::min(dim, active.size());
+        for (size_t k = 1; k <= max_k && !kkt_ok; ++k) {
+            for (const auto& subset : generate_subsets(active, k)) {
+                Matrix<double> N(dim, k, 0.0);
+                for (size_t col = 0; col < k; ++col) {
+                    const auto& normal = constraints[subset[col]].normal;
+                    for (size_t row = 0; row < dim; ++row) {
+                        N.at(row, col) = normal[row];
+                    }
+                }
+
+                Matrix<double> G = N.transpose() * N;
+                Vector<double> rhs = -(N.transpose() * g);
+
+                try {
+                    Vector<double> lambda = Matrix<double>::solve(G, rhs);
+                    Vector<double> residual = N * lambda + g;
+                    if (residual.norm() <= 1e-6) {
+                        bool all_nonnegative = true;
+                        for (double v : lambda) {
+                            if (v < -1e-6) {
+                                all_nonnegative = false;
+                                break;
+                            }
+                        }
+                        if (all_nonnegative) {
+                            kkt_ok = true;
+                            break;
+                        }
+                    }
+                } catch (const std::exception&) {
+                }
+            }
+        }
+    }
+
+    if (!kkt_ok) {
+        return false;
+    }
+
+    Matrix<double> H = numerical_hessian(objective, x, config.numeric.hessian_step);
+    if (active.empty()) {
+        return H.is_positive_definite();
+    }
+
+    Matrix<double> A = build_active_matrix(constraints, active, x.size());
+    std::vector<Vector<double>> basis = nullspace_basis(A, 1e-10);
+    if (basis.empty()) {
+        return true;
+    }
+
+    Matrix<double> Z(x.size(), basis.size(), 0.0);
+    for (size_t col = 0; col < basis.size(); ++col) {
+        for (size_t row = 0; row < x.size(); ++row) {
+            Z.at(row, col) = basis[col][row];
+        }
+    }
+
+    Matrix<double> reduced = Z.transpose() * H * Z;
+    return reduced.is_positive_definite();
+}
+
+} // namespace
 
 const std::vector<OptimizedPoint>& ProjectedGradientOptimizer::get_stationary_points() const {
     return stationary_points_;
@@ -53,19 +333,27 @@ bool ProjectedGradientOptimizer::is_duplicate(
 
 void ProjectedGradientOptimizer::validate_config() const {
     if (!objective_) {
-        throw ProjectedGradientOptimizationError("Objective must be provided");
+        throw ProjectedGradientConfigError("Objective must be provided");
     }
+
+    const bool has_box =
+        !config_.domain.lower_bound.empty() || !config_.domain.upper_bound.empty();
+
     if (config_.domain.lower_bound.size() != config_.domain.upper_bound.size()) {
         throw ProjectedGradientConfigError("Search bounds dimension mismatch");
     }
-    if (config_.domain.lower_bound.empty()) {
-        throw ProjectedGradientConfigError("Search bounds must not be empty");
-    }
-    for (size_t i = 0; i < config_.domain.lower_bound.size(); ++i) {
-        if (config_.domain.lower_bound[i] >= config_.domain.upper_bound[i]) {
-            throw ProjectedGradientConfigError("Each lower bound must be strictly less than upper bound");
+
+    if (has_box) {
+        if (config_.domain.lower_bound.empty()) {
+            throw ProjectedGradientConfigError("Both lower and upper bounds must be provided together");
+        }
+        for (size_t i = 0; i < config_.domain.lower_bound.size(); ++i) {
+            if (config_.domain.lower_bound[i] >= config_.domain.upper_bound[i]) {
+                throw ProjectedGradientConfigError("Each lower bound must be strictly less than upper bound");
+            }
         }
     }
+
     if (config_.numeric.max_iter == 0) {
         throw ProjectedGradientConfigError("max_iter must be positive");
     }
@@ -76,40 +364,110 @@ void ProjectedGradientOptimizer::validate_config() const {
         config_.numeric.min_alpha <= 0.0 ||
         config_.numeric.initial_alpha <= 0.0 ||
         config_.numeric.gradient_step <= 0.0 ||
-        config_.numeric.hessian_step <= 0.0) {
+        config_.numeric.hessian_step <= 0.0 ||
+        config_.numeric.projection_tol <= 0.0) {
         throw ProjectedGradientConfigError("Numeric tolerances must be positive");
     }
+
+    if (config_.numeric.projection_max_iter == 0) {
+        throw ProjectedGradientConfigError("projection_max_iter must be positive");
+    }
+
     if (config_.numeric.armijo_c1 <= 0.0 || config_.numeric.armijo_c1 >= 1.0) {
         throw ProjectedGradientConfigError("armijo_c1 must lie in (0, 1)");
     }
     if (config_.numeric.backtracking_beta <= 0.0 || config_.numeric.backtracking_beta >= 1.0) {
         throw ProjectedGradientConfigError("backtracking_beta must lie in (0, 1)");
     }
+
     if (config_.numeric.grid_resolution < 2) {
         throw ProjectedGradientConfigError("grid_resolution must be at least 2");
+    }
+
+    const size_t dim = !config_.domain.lower_bound.empty()
+        ? config_.domain.lower_bound.size()
+        : (!config_.linear_constraints.empty()
+           ? config_.linear_constraints.front().coefficients.size()
+           : 0);
+
+    for (const auto& c : config_.linear_constraints) {
+        if (c.coefficients.size() != dim) {
+            throw DimensionMismatchError("Linear constraint dimension mismatch");
+        }
     }
 }
 
 Vector<double> ProjectedGradientOptimizer::project_point(const Vector<double>& x) const {
-    if (x.size() != config_.domain.lower_bound.size()) {
-        throw DimensionMismatchError("Point dimension mismatch with feasible set");
+    const size_t dim = x.size();
+
+    if (!config_.domain.lower_bound.empty() && config_.domain.lower_bound.size() != dim) {
+        throw DimensionMismatchError("Point dimension mismatch with lower bounds");
+    }
+    if (!config_.domain.upper_bound.empty() && config_.domain.upper_bound.size() != dim) {
+        throw DimensionMismatchError("Point dimension mismatch with upper bounds");
     }
 
-    Vector<double> projected = x;
-    for (size_t i = 0; i < x.size(); ++i) {
-        if (projected[i] < config_.domain.lower_bound[i]) {
-            projected[i] = config_.domain.lower_bound[i];
-        }
-        if (projected[i] > config_.domain.upper_bound[i]) {
-            projected[i] = config_.domain.upper_bound[i];
+    std::vector<Halfspace> halfspaces;
+    halfspaces.reserve(
+        2 * dim + config_.linear_constraints.size()
+    );
+
+    if (!config_.domain.lower_bound.empty()) {
+        for (size_t i = 0; i < dim; ++i) {
+            Vector<double> e(dim, 0.0);
+            e[i] = 1.0;
+
+            halfspaces.push_back(Halfspace{e, config_.domain.upper_bound[i]});
+
+            halfspaces.push_back(Halfspace{e * -1.0, -config_.domain.lower_bound[i]});
         }
     }
-    return projected;
+
+    for (const auto& c : config_.linear_constraints) {
+        if (c.coefficients.size() != dim) {
+            throw DimensionMismatchError("Linear constraint dimension mismatch in projection");
+        }
+        halfspaces.push_back(make_halfspace_from_constraint(c));
+    }
+
+    if (halfspaces.empty()) {
+        return x;
+    }
+
+    Vector<double> y = x;
+    std::vector<Vector<double>> corrections(
+        halfspaces.size(),
+        Vector<double>(dim, 0.0)
+    );
+
+    for (size_t outer = 0; outer < config_.numeric.projection_max_iter; ++outer) {
+        Vector<double> prev = y;
+
+        for (size_t j = 0; j < halfspaces.size(); ++j) {
+            const Vector<double> s = y + corrections[j];
+            const Vector<double> p = project_onto_halfspace(s, halfspaces[j]);
+            corrections[j] = s - p;
+            y = p;
+        }
+
+        if ((y - prev).norm() <= config_.numeric.projection_tol) {
+            return y;
+        }
+
+        for (double v : y) {
+            if (std::isnan(v) || std::isinf(v)) {
+                throw ProjectedGradientOptimizationError("Projection diverged or overflowed");
+            }
+        }
+    }
+
+    throw ProjectedGradientOptimizationError("Projection onto feasible set did not converge");
 }
 
 bool ProjectedGradientOptimizer::is_minimum_point(const Vector<double>& x) const {
-    Matrix<double> H = numerical_hessian(objective_, x, config_.numeric.hessian_step);
-    return H.is_positive_definite();
+    const size_t dim = x.size();
+    const std::vector<ConstraintRep> constraints = collect_constraints(config_, dim);
+    return kkt_minimum_check(objective_, config_, x, constraints);
 }
 
 ProjectedGradientResult ProjectedGradientOptimizer::solve_from_start(
@@ -120,6 +478,20 @@ ProjectedGradientResult ProjectedGradientOptimizer::solve_from_start(
     if (start.empty()) {
         throw DimensionMismatchError("Start point is empty");
     }
+
+    auto effective_step_size = [this](double gnorm) {
+        return std::min(
+            config_.numeric.initial_alpha,
+            1.0 / std::max(1.0, gnorm)
+        );
+    };
+
+    auto projected_stationarity = [this, &effective_step_size](const Vector<double>& point) {
+        const Vector<double> g = numerical_gradient(objective_, point, config_.numeric.gradient_step);
+        const double tau = effective_step_size(g.norm());
+        const Vector<double> step = project_point(point - g * tau) - point;
+        return step.norm() / tau;
+    };
 
     Vector<double> x = project_point(start);
     double fx = objective_(x);
@@ -143,7 +515,20 @@ ProjectedGradientResult ProjectedGradientOptimizer::solve_from_start(
                       << "  ||grad|| = " << gnorm << '\n';
         }
 
-        double alpha = config_.numeric.initial_alpha;
+        const double current_stationarity = projected_stationarity(x);
+        if (current_stationarity <= config_.numeric.stationarity_tol) {
+            converged = true;
+            if (logs) {
+                std::cout << "[ProjectedGradient] Projected stationarity below tolerance.\n"
+                          << "  x*      = " << x << '\n'
+                          << "  f(x*)   = " << fx << '\n'
+                          << "  stationarity = " << current_stationarity << '\n';
+            }
+            return {x, fx, current_stationarity, converged, iter};
+        }
+
+        const double alpha_cap = effective_step_size(gnorm);
+        double alpha = alpha_cap;
         bool accepted = false;
         Vector<double> candidate;
         Vector<double> step;
@@ -154,19 +539,6 @@ ProjectedGradientResult ProjectedGradientOptimizer::solve_from_start(
             candidate = project_point(x - g * alpha);
             step = candidate - x;
             stationarity_measure = step.norm() / alpha;
-
-            if (stationarity_measure < config_.numeric.grad_tol || step.norm() < config_.numeric.step_tol) {
-                x = candidate;
-                fx = objective_(x);
-                converged = true;
-                if (logs) {
-                    std::cout << "[ProjectedGradient] Projected step below tolerance.\n"
-                              << "  x*      = " << x << '\n'
-                              << "  f(x*)   = " << fx << '\n'
-                              << "  stationarity = " << stationarity_measure << '\n';
-                }
-                return {x, fx, stationarity_measure, converged, iter + 1};
-            }
 
             try {
                 fc = objective_(candidate);
@@ -211,9 +583,7 @@ ProjectedGradientResult ProjectedGradientOptimizer::solve_from_start(
         if ((candidate - x).norm() < config_.numeric.step_tol) {
             x = candidate;
             fx = fc;
-            const Vector<double> gfinal = numerical_gradient(objective_, x, config_.numeric.gradient_step);
-            const Vector<double> projected_step = project_point(x - gfinal * config_.numeric.initial_alpha) - x;
-            const double final_stationarity = projected_step.norm() / config_.numeric.initial_alpha;
+            const double final_stationarity = projected_stationarity(x);
             converged = final_stationarity < config_.numeric.grad_tol;
             if (logs) {
                 std::cout << "[ProjectedGradient] Step norm below tolerance.\n"
@@ -240,9 +610,7 @@ ProjectedGradientResult ProjectedGradientOptimizer::solve_from_start(
         }
     }
 
-    const Vector<double> gfinal = numerical_gradient(objective_, x, config_.numeric.gradient_step);
-    const Vector<double> projected_step = project_point(x - gfinal * config_.numeric.initial_alpha) - x;
-    const double stationarity_measure = projected_step.norm() / config_.numeric.initial_alpha;
+    const double stationarity_measure = projected_stationarity(x);
     converged = stationarity_measure < config_.numeric.grad_tol;
     if (logs) {
         std::cout << "\n[ProjectedGradient] Max iterations reached.\n"
@@ -301,8 +669,10 @@ void ProjectedGradientOptimizer::optimize(
                 }
             }
         } catch (const std::exception& e) {
-            std::cerr << "[ProjectedGradientOptimizer] Start point " << start
-                      << " failed: " << e.what() << '\n';
+            if (logs) {
+                std::cerr << "[ProjectedGradientOptimizer] Start point " << start
+                          << " failed: " << e.what() << '\n';
+            }
         }
     }
     auto cmp = [](const OptimizedPoint& a, const OptimizedPoint& b) {

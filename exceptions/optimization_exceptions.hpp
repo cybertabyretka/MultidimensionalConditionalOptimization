@@ -32,3 +32,21 @@ public:
     explicit ProjectionError(const std::string& message)
         : OptimizationError("Projection Error: " + message) {}
 };
+
+class ProjectedGradientConfigError : public ProjectionError {
+public:
+    explicit ProjectedGradientConfigError(const std::string& message)
+        : ProjectionError("Projected Gradient Config Error: " + message) {}
+};
+
+class ProjectedGradientOptimizationError : public ProjectionError {
+public:
+    explicit ProjectedGradientOptimizationError(const std::string& message)
+        : ProjectionError("Projected Gradient Optimization Error: " + message) {}
+};
+
+class ProjectedGradientConvergenceError : public ProjectionError {
+public:
+    explicit ProjectedGradientConvergenceError(const std::string& message)
+        : ProjectionError("Projected Gradient Convergence Error: " + message) {}
+};

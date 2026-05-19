@@ -61,7 +61,9 @@ Vector<double> numerical_gradient(
             const double fm = f(xm);
             g[i] = (fp - fm) / (2.0 * h);
         } catch (const std::exception& e) {
-            throw ObjectiveEvaluationError("Failed to evaluate objective during gradient computation: " + std::string(e.what()));
+            throw ObjectiveEvaluationError(
+                "Failed to evaluate objective during gradient computation: " + std::string(e.what())
+            );
         }
     }
 
@@ -109,7 +111,9 @@ Matrix<double> numerical_hessian(
                 const double fm = f(xm);
                 H.at(i, i) = (fp - 2.0 * fx + fm) / (h[i] * h[i]);
             } catch (const std::exception& e) {
-                throw ObjectiveEvaluationError("Failed to evaluate objective during Hessian computation: " + std::string(e.what()));
+                throw ObjectiveEvaluationError(
+                    "Failed to evaluate objective during Hessian computation: " + std::string(e.what())
+                );
             }
         }
 
@@ -137,7 +141,9 @@ Matrix<double> numerical_hessian(
                 H.at(i, j) = value;
                 H.at(j, i) = value;
             } catch (const std::exception& e) {
-                throw ObjectiveEvaluationError("Failed to evaluate objective during Hessian computation: " + std::string(e.what()));
+                throw ObjectiveEvaluationError(
+                    "Failed to evaluate objective during Hessian computation: " + std::string(e.what())
+                );
             }
         }
     }

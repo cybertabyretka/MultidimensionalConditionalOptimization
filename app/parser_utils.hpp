@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "utils/vector.hpp"
+
 #include "exceptions/config_exceptions.hpp"
 
 inline std::string trim_copy(std::string s) {

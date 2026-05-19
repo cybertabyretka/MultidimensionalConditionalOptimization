@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cmath>
+#include <initializer_list>
 #include <numbers>
 #include <stdexcept>
+#include <vector>
 
-#include "newton_optimizer.hpp"
-#include "newton_configs.hpp"
+#include "projected_gradient_optimizer.hpp"
 
 #include "utils/vector.hpp"
 #include "utils/matrix.hpp"
@@ -13,172 +14,263 @@
 
 #include "tests/utils.hpp"
 
-#include "exceptions/intervals_exceptions.hpp"
 #include "exceptions/optimization_exceptions.hpp"
+#include "exceptions/vector_matrix_exceptions.hpp"
 
-/**
- * @brief Optimizer - Simple quadratic function (standard case)
- * 
- * Function: f(x) = x1^2 + x2^2, minimum at (0, 0), value 0
- */
-void test_optimizer_quadratic() {
+inline LinearConstraint make_constraint(
+    std::initializer_list<double> coeffs,
+    double rhs,
+    bool greater_equal = false
+) {
+    LinearConstraint c;
+    c.coefficients = Vector<double>(coeffs);
+    c.rhs = rhs;
+    c.greater_equal = greater_equal;
+    return c;
+}
+
+template <typename Objective>
+inline ProjectedGradientOptimizerConfig make_optimizer_config(
+    Objective objective,
+    const std::vector<LinearConstraint>& constraints
+) {
+    ProjectedGradientOptimizerConfig cfg;
+    cfg.problem.objective = objective;
+    cfg.linear_constraints = constraints;
+    cfg.numeric.max_iter = 200;
+    cfg.numeric.grad_tol = 1e-6;
+    cfg.numeric.step_tol = 1e-8;
+    cfg.numeric.stationarity_tol = 1e-6;
+    cfg.numeric.duplicate_tol = 1e-4;
+    cfg.numeric.armijo_c1 = 1e-4;
+    cfg.numeric.backtracking_beta = 0.5;
+    cfg.numeric.min_alpha = 1e-12;
+    cfg.numeric.initial_alpha = 1.0;
+    cfg.numeric.gradient_step = 1e-6;
+    cfg.numeric.hessian_step = 1e-4;
+    cfg.numeric.projection_tol = 1e-10;
+    cfg.numeric.projection_max_iter = 1000;
+    return cfg;
+}
+
+inline void test_optimizer_quadratic() {
     try {
         auto f = [](const Vector<double>& x) -> double {
-            return x[0] * x[0] + x[1] * x[1];
+            return (x[0] - 2.0) * (x[0] - 2.0) + 3.0 * (x[1] - 1.0) * (x[1] - 1.0);
         };
-        NewtonOptimizerConfig cfg;
-        cfg.problem.objective = f;
-        cfg.search.lower_bound = Vector<double>{-5.0, -5.0};
-        cfg.search.upper_bound = Vector<double>{5.0, 5.0};
-        cfg.search.grid_resolution = 3;
-        cfg.numeric.max_iter = 50;
-        cfg.numeric.grad_tol = 1e-6;
-        cfg.numeric.gradient_step = 1e-6;
-        cfg.numeric.hessian_step = 1e-4;
-        NewtonOptimizer optimizer(cfg);
-        // Run from one starting point
-        NewtonResult result = optimizer.optimize(Vector<double>{2.0, 3.0}, false);
-        // Check convergence
-        if (!result.converged)
-            throw std::logic_error("Optimizer did not converge for simple quadratic");
-        // Check that the found point is close to (0, 0)
-        if (!result.point.equals(Vector<double>{0.0, 0.0}, 1e-4))
-            throw std::logic_error("Solution not close to (0,0)");
-        // Check the function value at the found point
-        double f_at_solution = f(result.point);
-        if (!double_equals(f_at_solution, 0.0, 1e-6))
-            throw std::logic_error("Function value at solution not close to 0");
-    } catch (const std::exception& e) {
+
+        std::vector<LinearConstraint> constraints = {
+            make_constraint({1.0, 0.0}, 0.0, true),
+            make_constraint({0.0, 1.0}, 0.0, true),
+            make_constraint({1.0, 1.0}, 5.0, false)
+        };
+
+        ProjectedGradientOptimizer optimizer(make_optimizer_config(f, constraints));
+        ProjectedGradientResult result = optimizer.optimize(Vector<double>{-4.0, 7.0}, false);
+
+        if (!result.converged) {
+            throw std::logic_error("Optimizer did not converge for constrained quadratic");
+        }
+        if (!result.point.equals(Vector<double>{2.0, 1.0}, 1e-3)) {
+            throw std::logic_error("Constrained quadratic solution is incorrect");
+        }
+        if (std::abs(result.value) > 1e-6) {
+            throw std::logic_error("Constrained quadratic value is incorrect");
+        }
+
+        try {
+            std::vector<LinearConstraint> bad_constraints = {
+                make_constraint({1.0, 1.0, 1.0}, 1.0, false)
+            };
+            ProjectedGradientOptimizer bad_optimizer(make_optimizer_config(f, bad_constraints));
+            bad_optimizer.optimize(Vector<double>{0.0, 0.0}, false);
+            throw std::logic_error("Invalid configuration should have failed");
+        } catch (const DimensionMismatchError&) {
+        }
+    } catch (const std::logic_error& e) {
         print_test_failed("Optimizer_Quadratic", e.what());
     }
 }
 
-/**
- * @brief Optimizer - Rosenbrock function (hard standard case)
- * 
- * Classic function: f(x1,x2) = (1-x1)^2 + 100*(x2-x1^2)^2.
- * Minimum at (1, 1), value 0.
- */
-void test_optimizer_rosenbrock() {
+inline void test_optimizer_course_problem() {
     try {
         auto f = [](const Vector<double>& x) -> double {
-            const double x1 = x[0], x2 = x[1];
-            return (1.0 - x1) * (1.0 - x1) + 100.0 * (x2 - x1 * x1) * (x2 - x1 * x1);
+            const double x1 = x[0];
+            const double x2 = x[1];
+            return (x1 - 10.0) * (x1 - 10.0) + 100.0 * (x2 - 10.0) * (x2 - 10.0);
         };
-        NewtonOptimizerConfig cfg;
-        cfg.problem.objective = f;
-        cfg.search.lower_bound = Vector<double>{-2.0, -2.0};
-        cfg.search.upper_bound = Vector<double>{2.0, 2.0};
-        cfg.search.grid_resolution = 5;
-        cfg.numeric.max_iter = 100;
-        cfg.numeric.grad_tol = 1e-6;
-        cfg.numeric.gradient_step = 1e-6;
-        cfg.numeric.hessian_step = 1e-4;
-        NewtonOptimizer optimizer(cfg);
-        std::vector<Vector<double>> starts;
-        starts.push_back(Vector<double>{-1.0, -1.0});
-        starts.push_back(Vector<double>{0.0, 0.0});
-        starts.push_back(Vector<double>{1.5, 1.5});
+
+        std::vector<LinearConstraint> constraints = {
+            make_constraint({-1.0, 3.0}, 12.0, false),
+            make_constraint({2.0, 5.0}, 30.0, false),
+            make_constraint({3.0, 2.0}, 22.0, false),
+            make_constraint({1.0, -3.0}, 0.0, false),
+            make_constraint({2.0, 5.0}, 10.0, true),
+            make_constraint({5.0, 1.0}, 5.0, true),
+            make_constraint({1.0, 0.0}, 0.0, true),
+            make_constraint({0.0, 1.0}, 0.0, true)
+        };
+
+        ProjectedGradientOptimizer optimizer(make_optimizer_config(f, constraints));
+        std::vector<Vector<double>> starts = {
+            Vector<double>{0.0, 0.0},
+            Vector<double>{2.0, 5.0},
+            Vector<double>{5.0, 5.0}
+        };
         optimizer.optimize(starts, false);
-        // Check that the optimizer found at least one point
-        const auto& min_points = optimizer.get_minimum_points();
-        if (min_points.empty())
-            throw std::logic_error("No minimum points found for Rosenbrock");
-        // Check that the best point is close to (1, 1)
-        const auto& best = min_points[0];
-        if (!best.point.equals(Vector<double>{1.0, 1.0}, 5e-2))
-            throw std::logic_error("Best solution not close to (1, 1)");
-        // Check that the function value is acceptable
-        if (best.value > 1e-3)
-            throw std::logic_error("Function value at best point too high");
-    } catch (const std::exception& e) {
+
+        const auto& minimum_points = optimizer.get_minimum_points();
+        if (minimum_points.empty()) {
+            throw std::logic_error("Course problem minimum was not found");
+        }
+
+        const Vector<double> expected{2.73, 4.91};
+        if (!minimum_points[0].point.equals(expected, 0.05)) {
+            throw std::logic_error("Course problem minimum coordinates are incorrect");
+        }
+        if (minimum_points[0].value > 2650.0) {
+            throw std::logic_error("Course problem minimum value is too large");
+        }
+    } catch (const std::logic_error& e) {
+        print_test_failed("Optimizer_CourseProblem", e.what());
+    }
+}
+
+inline void test_optimizer_rosenbrock() {
+    try {
+        auto f = [](const Vector<double>& x) -> double {
+            return x[0] + 2.0 * x[1];
+        };
+
+        std::vector<LinearConstraint> constraints = {
+            make_constraint({1.0, 0.0}, 0.0, true),
+            make_constraint({0.0, 1.0}, 0.0, true),
+            make_constraint({1.0, 1.0}, 1.0, false)
+        };
+
+        ProjectedGradientOptimizer optimizer(make_optimizer_config(f, constraints));
+        std::vector<Vector<double>> starts = {
+            Vector<double>{0.4, 0.4},
+            Vector<double>{0.9, 0.1},
+            Vector<double>{0.1, 0.9}
+        };
+        optimizer.optimize(starts, false);
+
+        const auto& minimum_points = optimizer.get_minimum_points();
+        if (minimum_points.empty()) {
+            throw std::logic_error("No minimum points found for boundary constrained problem");
+        }
+
+        if (!minimum_points[0].point.equals(Vector<double>{0.0, 0.0}, 1e-3)) {
+            throw std::logic_error("Boundary minimum should be at the origin");
+        }
+        if (std::abs(minimum_points[0].value) > 1e-6) {
+            throw std::logic_error("Boundary minimum value is incorrect");
+        }
+    } catch (const std::logic_error& e) {
         print_test_failed("Optimizer_Rosenbrock", e.what());
     }
 }
 
-/**
- * @brief Optimizer - Saddle point function (extreme case)
- * 
- * Function: f(x1,x2) = (x1^2-1)^2 + (x2^2-1)^2 + 0.5*x1*x2. 
- * Minima are near (±1, ±1), saddle points are elsewhere
- */
-void test_optimizer_saddle_point() {
+inline void test_optimizer_saddle_point() {
     try {
         auto f = [](const Vector<double>& x) -> double {
-            const double x1 = x[0], x2 = x[1];
-            const double term1 = (x1 * x1 - 1.0) * (x1 * x1 - 1.0);
-            const double term2 = (x2 * x2 - 1.0) * (x2 * x2 - 1.0);
-            return term1 + term2 + 0.5 * x1 * x2;
+            return -x[0] * x[0] + x[1] * x[1];
         };
-        NewtonOptimizerConfig cfg;
-        cfg.problem.objective = f;
-        cfg.search.lower_bound = Vector<double>{-2.0, -2.0};
-        cfg.search.upper_bound = Vector<double>{2.0, 2.0};
-        cfg.search.grid_resolution = 5;
-        cfg.numeric.max_iter = 50;
-        cfg.numeric.grad_tol = 1e-6;
-        cfg.numeric.stationarity_tol = 1e-6;
-        cfg.numeric.gradient_step = 1e-6;
-        cfg.numeric.hessian_step = 1e-4;
-        NewtonOptimizer optimizer(cfg);
-        std::vector<Vector<double>> starts;
-        starts.push_back(Vector<double>{0.5, 0.5});
-        starts.push_back(Vector<double>{1.5, 1.5});
-        starts.push_back(Vector<double>{-1.5, 1.5});
+
+        std::vector<LinearConstraint> constraints = {
+            make_constraint({1.0, 0.0}, 1.0, false),
+            make_constraint({1.0, 0.0}, -1.0, true),
+            make_constraint({0.0, 1.0}, 0.0, false),
+            make_constraint({0.0, 1.0}, 0.0, true)
+        };
+
+        ProjectedGradientOptimizer optimizer(make_optimizer_config(f, constraints));
+        std::vector<Vector<double>> starts = {
+            Vector<double>{0.0, 0.0},
+            Vector<double>{0.5, 0.0},
+            Vector<double>{-0.5, 0.0}
+        };
         optimizer.optimize(starts, false);
-        // Check that minimum points were found
-        const auto& min_points = optimizer.get_minimum_points();
-        if (min_points.empty())
-            throw std::logic_error("No minimum points found");
-        // Check that the best point has an acceptable value (close to the minima)
-        // Minima should be close to (±1, ±1)
-        const auto& best = min_points[0];
-        const bool x1_valid = (best.point[0] > 0.5 && best.point[0] < 1.5) ||
-                              (best.point[0] < -0.5 && best.point[0] > -1.5);
-        const bool x2_valid = (best.point[1] > 0.5 && best.point[1] < 1.5) ||
-                              (best.point[1] < -0.5 && best.point[1] > -1.5);
-        if (!(x1_valid && x2_valid))
-            throw std::logic_error("Best solution not in expected region");
-    } catch (const std::exception& e) {
+
+        const auto& stationary_points = optimizer.get_stationary_points();
+        const auto& minimum_points = optimizer.get_minimum_points();
+
+        if (stationary_points.empty()) {
+            throw std::logic_error("Expected a stationary point at the origin");
+        }
+
+        bool origin_is_stationary = false;
+        for (const auto& p : stationary_points) {
+            if (p.point.equals(Vector<double>{0.0, 0.0}, 1e-6)) {
+                origin_is_stationary = true;
+                break;
+            }
+        }
+        if (!origin_is_stationary) {
+            throw std::logic_error("Origin should be stationary for the constrained saddle test");
+        }
+
+        for (const auto& p : minimum_points) {
+            if (p.point.equals(Vector<double>{0.0, 0.0}, 1e-6)) {
+                throw std::logic_error("Origin must not be classified as a minimum");
+            }
+        }
+    } catch (const std::logic_error& e) {
         print_test_failed("Optimizer_SaddlePoint", e.what());
     }
 }
 
-/**
- * @brief Optimizer - Multiple local minima (extreme case)
- * 
- * Function: f(x) = sin(pi*x1) * sin(pi*x2), multiple local minima and maxima
- */
-void test_optimizer_multiple_minima() {
+inline void test_optimizer_multiple_minima() {
     try {
-        const double PI = std::numbers::pi;
-        
-        auto f = [PI](const Vector<double>& x) -> double {
-            return std::sin(PI * x[0]) * std::sin(PI * x[1]);
+        auto f = [](const Vector<double>& x) -> double {
+            const double a = x[0] * x[0] * (x[0] - 2.0) * (x[0] - 2.0);
+            const double b = x[1] * x[1] * (x[1] - 2.0) * (x[1] - 2.0);
+            return a + b;
         };
-        NewtonOptimizerConfig cfg;
-        cfg.problem.objective = f;
-        cfg.search.lower_bound = Vector<double>{-2.0, -2.0};
-        cfg.search.upper_bound = Vector<double>{2.0, 2.0};
-        cfg.search.grid_resolution = 7;
-        cfg.numeric.max_iter = 50;
-        cfg.numeric.grad_tol = 1e-6;
-        cfg.numeric.gradient_step = 1e-6;
-        cfg.numeric.hessian_step = 1e-4;
-        NewtonOptimizer optimizer(cfg);
-        std::vector<Vector<double>> starts;
-        // Different starting points
-        starts.push_back(Vector<double>{0.3, 0.3});
-        starts.push_back(Vector<double>{-0.3, 0.3});
-        starts.push_back(Vector<double>{1.2, 1.2});
+
+        std::vector<LinearConstraint> constraints = {
+            make_constraint({1.0, 0.0}, 0.0, true),
+            make_constraint({0.0, 1.0}, 0.0, true),
+            make_constraint({1.0, 0.0}, 2.0, false),
+            make_constraint({0.0, 1.0}, 2.0, false)
+        };
+
+        ProjectedGradientOptimizer optimizer(make_optimizer_config(f, constraints));
+        std::vector<Vector<double>> starts = {
+            Vector<double>{0.0, 0.0},
+            Vector<double>{0.0, 2.0},
+            Vector<double>{2.0, 0.0},
+            Vector<double>{2.0, 2.0},
+            Vector<double>{1.0, 1.0}
+        };
         optimizer.optimize(starts, false);
-        const auto& min_points = optimizer.get_minimum_points();
-        // Check that several distinct minima were found, or at least one
-        if (min_points.empty())
-            throw std::logic_error("No minimum points found");
-        if (min_points[0].value > -0.5)
-            throw std::logic_error("Minimum point should have negative value");
-    } catch (const std::exception& e) {
+
+        const auto& minimum_points = optimizer.get_minimum_points();
+        if (minimum_points.size() < 4) {
+            throw std::logic_error("Expected four distinct minima on the box corners");
+        }
+
+        const std::vector<Vector<double>> expected = {
+            Vector<double>{0.0, 0.0},
+            Vector<double>{0.0, 2.0},
+            Vector<double>{2.0, 0.0},
+            Vector<double>{2.0, 2.0}
+        };
+
+        for (const auto& target : expected) {
+            bool found = false;
+            for (const auto& p : minimum_points) {
+                if (p.point.equals(target, 1e-3)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                throw std::logic_error("Missing expected corner minimum");
+            }
+        }
+    } catch (const std::logic_error& e) {
         print_test_failed("Optimizer_MultipleMinima", e.what());
     }
 }
@@ -221,7 +313,7 @@ void test_numerical_gradient() {
                 throw std::logic_error("numerical_gradient should have propagated exception");
             } catch (const ObjectiveEvaluationError&) {}
         }
-    } catch (const std::exception& e) {
+    } catch (const std::logic_error& e) {
         print_test_failed("Numerical_Gradient", e.what());
     }
 }
@@ -276,7 +368,7 @@ void test_numerical_hessian() {
                 throw std::logic_error("numerical_hessian should have propagated exception");
             } catch (const ObjectiveEvaluationError&) {}
         }
-    } catch (const std::exception& e) {
+    } catch (const std::logic_error& e) {
         print_test_failed("Numerical_Hessian", e.what());
     }
 }

@@ -8,6 +8,12 @@ struct ProjectedGradientFunctionSet {
     std::function<double(const Vector<double>&)> objective;
 };
 
+struct LinearConstraint {
+    Vector<double> coefficients;
+    double rhs{};
+    bool greater_equal{false};
+};
+
 struct ProjectedGradientDomainConfig {
     Vector<double> lower_bound;
     Vector<double> upper_bound;
@@ -26,10 +32,13 @@ struct ProjectedGradientNumericConfig {
     size_t grid_resolution = 5;
     double gradient_step = 1e-6;
     double hessian_step = 1e-4;
+    double projection_tol{1e-10};
+    size_t projection_max_iter{1000};
 };
 
 struct ProjectedGradientOptimizerConfig {
     ProjectedGradientFunctionSet problem;
     ProjectedGradientDomainConfig domain;
     ProjectedGradientNumericConfig numeric;
+    std::vector<LinearConstraint> linear_constraints;
 };

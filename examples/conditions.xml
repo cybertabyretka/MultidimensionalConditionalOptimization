@@ -1,0 +1,44 @@
+<conditions>
+    <constraints>
+        <constraint>
+            <coefficients>-1 3</coefficients>
+            <rhs>12</rhs>
+            <sense>&lt;=</sense>
+        </constraint>
+        <constraint>
+            <coefficients>2 5</coefficients>
+            <rhs>30</rhs>
+            <sense>&lt;=</sense>
+        </constraint>
+        <constraint>
+            <coefficients>3 2</coefficients>
+            <rhs>22</rhs>
+            <sense>&lt;=</sense>
+        </constraint>
+        <constraint>
+            <coefficients>1 -3</coefficients>
+            <rhs>0</rhs>
+            <sense>&lt;=</sense>
+        </constraint>
+        <constraint>
+            <coefficients>2 5</coefficients>
+            <rhs>10</rhs>
+            <sense>&gt;=</sense>
+        </constraint>
+        <constraint>
+            <coefficients>5 1</coefficients>
+            <rhs>5</rhs>
+            <sense>&gt;=</sense>
+        </constraint>
+        <constraint>
+            <coefficients>1 0</coefficients>
+            <rhs>0</rhs>
+            <sense>&gt;=</sense>
+        </constraint>
+        <constraint>
+            <coefficients>0 1</coefficients>
+            <rhs>0</rhs>
+            <sense>&gt;=</sense>
+        </constraint>
+    </constraints>
+</conditions>

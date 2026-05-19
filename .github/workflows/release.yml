@@ -45,17 +45,17 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          g++ -std=c++20 -I . -Wall -Wextra -O2 -static app/main.cpp utils/grid_generator.cpp newton_optimizer.cpp -o mdo-windows.exe
+          g++ -std=c++20 -I . -Wall -Wextra -O2 -static app/main.cpp projected_gradient_optimizer.cpp utils/grid_generator.cpp -o cmdo-windows.exe
 
       - name: Build on Ubuntu
         if: matrix.os == 'ubuntu-latest'
         run: |
-          g++ -std=c++20 -I . -Wall -Wextra -O2 -static app/main.cpp utils/grid_generator.cpp newton_optimizer.cpp -o mdo-linux
+          g++ -std=c++20 -I . -Wall -Wextra -O2 -static app/main.cpp projected_gradient_optimizer.cpp utils/grid_generator.cpp -o cmdo-linux
 
       - name: Build on macOS
         if: matrix.os == 'macos-latest'
         run: |
-          g++ -std=c++20 -I . -Wall -Wextra -O2 -static-libstdc++ app/main.cpp utils/grid_generator.cpp newton_optimizer.cpp -o mdo-darwin
+          g++ -std=c++20 -I . -Wall -Wextra -O2 -static-libstdc++ app/main.cpp projected_gradient_optimizer.cpp utils/grid_generator.cpp -o cmdo-darwin
 
       - name: Check Windows artifact
         if: matrix.os == 'windows-latest'

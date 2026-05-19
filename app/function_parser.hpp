@@ -234,7 +234,7 @@ inline MultiVarFunction parse_function(
 
     return [terms = std::move(terms), var_index = std::move(var_index), variables](const std::vector<double>& values) -> double {
         if (values.size() != variables.size()) {
-            throw std::invalid_argument("Wrong number of variable values");
+            throw LaTeXParserException("Wrong number of variable values");
         }
 
         double result = 0.0;

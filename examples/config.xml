@@ -1,24 +1,18 @@
 <config>
-    <lower_bound>-2 -2</lower_bound>
-    <upper_bound>2 2</upper_bound>
+    <lower_bound>0 0</lower_bound>
+    <upper_bound>8 8</upper_bound>
 
     <grid_resolution>5</grid_resolution>
 
-    <max_iter>100</max_iter>
-
+    <max_iter>200</max_iter>
     <grad_tol>1e-6</grad_tol>
-    <step_tol>1e-8</step_tol>
+    <step_tol>1e-10</step_tol>
     <stationarity_tol>1e-6</stationarity_tol>
     <duplicate_tol>1e-4</duplicate_tol>
-
     <armijo_c1>1e-4</armijo_c1>
     <backtracking_beta>0.5</backtracking_beta>
     <min_alpha>1e-12</min_alpha>
-
-    <initial_regularization>1e-8</initial_regularization>
-    <regularization_growth>10.0</regularization_growth>
-    <max_regularization>1e8</max_regularization>
-
+    <initial_alpha>1.0</initial_alpha>
     <gradient_step>1e-6</gradient_step>
-    <hessian_step>1e-5</hessian_step>
+    <hessian_step>1e-4</hessian_step>
 </config>

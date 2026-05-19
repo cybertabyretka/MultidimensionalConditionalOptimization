@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "projected_gradient_configs.hpp"
+
 #include "utils/vector.hpp"
 #include "utils/derivatives.hpp"
 

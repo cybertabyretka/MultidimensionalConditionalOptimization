@@ -15,6 +15,11 @@
 #include "utils/grid_generator.hpp"
 #include "utils/vector.hpp"
 
+#include "exceptions/config_exceptions.hpp"
+#include "exceptions/latex_parser_exceptions.hpp"
+#include "exceptions/optimization_exceptions.hpp"
+#include "exceptions/vector_matrix_exceptions.hpp"
+
 inline auto make_objective(
     const std::string& expr,
     const std::vector<std::string>& vars
@@ -30,7 +35,7 @@ inline auto make_objective(
 inline std::string read_text_file(const std::string& path) {
     std::ifstream in(path);
     if (!in.is_open()) {
-        throw std::runtime_error("Cannot open file: " + path);
+        throw ConfigFileOpenException(path);
     }
 
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
@@ -44,6 +49,45 @@ inline void print_points(const std::vector<OptimizedPoint>& points) {
     }
 }
 
+inline size_t infer_domain_dimension(
+    const ProjectedGradientDomainConfig& cfg,
+    const std::vector<LinearConstraint>& linear_constraints
+) {
+    if (!cfg.lower_bound.empty()) {
+        return cfg.lower_bound.size();
+    }
+    if (!linear_constraints.empty()) {
+        return linear_constraints.front().coefficients.size();
+    }
+    return 0;
+}
+
+inline std::vector<Vector<double>> generate_fallback_starts(size_t dim) {
+    std::vector<Vector<double>> starts;
+    starts.reserve(2 * dim + 1);
+
+    Vector<double> zero(dim);
+    for (size_t i = 0; i < dim; ++i) {
+        zero[i] = 0.0;
+    }
+    starts.push_back(zero);
+
+    for (size_t i = 0; i < dim; ++i) {
+        Vector<double> p(dim);
+        for (size_t j = 0; j < dim; ++j) {
+            p[j] = 0.0;
+        }
+
+        p[i] = 1.0;
+        starts.push_back(p);
+
+        p[i] = -1.0;
+        starts.push_back(p);
+    }
+
+    return starts;
+}
+
 int run_app(
     const std::string& command,
     const std::string& config_path,
@@ -55,15 +99,23 @@ int run_app(
     const std::vector<std::string> variables = extract_variables_in_order(objective_text);
 
     if (variables.empty()) {
-        throw std::runtime_error("No variables found in objective file");
+        throw LaTeXParserException("No variables found in objective file");
     }
 
     ProjectedGradientDomainConfig domain_cfg = parse_conditions_from_xml(conditions_path);
     ProjectedGradientNumericConfig numeric_cfg = parse_numeric_config_from_xml(config_path);
 
-    if (domain_cfg.lower_bound.size() != variables.size()) {
-        throw std::runtime_error(
-            "Dimension mismatch: conditions have " + std::to_string(domain_cfg.lower_bound.size()) +
+    const std::string conditions_text = read_text_file(conditions_path);
+    std::vector<LinearConstraint> linear_constraints = parse_linear_constraints_from_xml(conditions_text);
+
+    const size_t domain_dim = infer_domain_dimension(domain_cfg, linear_constraints);
+    if (domain_dim == 0) {
+        throw InputOptimizationError("Failed to infer domain dimension from conditions");
+    }
+
+    if (domain_dim != variables.size()) {
+        throw DimensionMismatchError(
+            "conditions have " + std::to_string(domain_dim) +
             " variables, but objective contains " + std::to_string(variables.size())
         );
     }
@@ -71,14 +123,20 @@ int run_app(
     ProjectedGradientOptimizerConfig cfg;
     cfg.domain = domain_cfg;
     cfg.numeric = numeric_cfg;
+    cfg.linear_constraints = std::move(linear_constraints);
     cfg.problem.objective = make_objective(objective_text, variables);
 
-    GridGenerator grid;
-    std::vector<Vector<double>> starts = grid.generate(
-        cfg.domain.lower_bound,
-        cfg.domain.upper_bound,
-        cfg.numeric.grid_resolution
-    );
+    std::vector<Vector<double>> starts;
+    if (!cfg.domain.lower_bound.empty()) {
+        GridGenerator grid;
+        starts = grid.generate(
+            cfg.domain.lower_bound,
+            cfg.domain.upper_bound,
+            cfg.numeric.grid_resolution
+        );
+    } else {
+        starts = generate_fallback_starts(domain_dim);
+    }
 
     ProjectedGradientOptimizer optimizer(cfg);
     optimizer.optimize(starts, log_enabled);
@@ -93,14 +151,14 @@ int run_app(
         return 0;
     }
 
-    throw std::runtime_error("Unknown command: " + command);
+    throw InputOptimizationError("Unknown command: " + command);
 }
 
 inline void print_usage(const char* program_name) {
     std::cerr
         << "Usage:\n"
-        << "  " << program_name << " find_min  <config.xml> <objective.txt> <conditions.xml> [--log]\n"
-        << "  " << program_name << " find_stat <config.xml> <objective.txt> <conditions.xml> [--log]\n";
+        << "  " << program_name << " find_min  <config.xml> <objective.txt> <conditions.xml> [--log|--logs]\n"
+        << "  " << program_name << " find_stat <config.xml> <objective.txt> <conditions.xml> [--log|--logs]\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -117,7 +175,8 @@ int main(int argc, char* argv[]) {
 
         bool log_enabled = false;
         if (argc == 6) {
-            if (std::string(argv[5]) != "--log") {
+            const std::string flag = argv[5];
+            if (flag != "--log" && flag != "--logs") {
                 print_usage(argv[0]);
                 return 1;
             }

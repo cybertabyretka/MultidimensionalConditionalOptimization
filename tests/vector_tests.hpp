@@ -51,7 +51,7 @@ void test_vector_normal() {
         Vector<double> divided = Vector<double>{4.0, 2.0, 6.0} / 2.0;
         if (!divided.equals(Vector<double>{2.0, 1.0, 3.0}, 1e-9))
             throw std::logic_error("Division failed");
-    } catch (const std::exception& e) {
+    } catch (const std::logic_error& e) {
         print_test_failed("Vector_Normal", e.what());
     }
 }
@@ -91,7 +91,7 @@ void test_vector_edge_cases() {
             v1.dot(v2);  // Should throw DimensionMismatchError
             throw std::logic_error("Should have thrown DimensionMismatchError for dot product");
         } catch (const DimensionMismatchError&) {}
-    } catch (const std::exception& e) {
+    } catch (const std::logic_error& e) {
         print_test_failed("Vector_EdgeCases", e.what());
     }
 }
