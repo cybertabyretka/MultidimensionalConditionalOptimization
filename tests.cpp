@@ -27,8 +27,8 @@ int main() {
     test_matrix_edge_cases();
 
     test_optimizer_quadratic();
-    test_optimizer_course_problem();
-    test_optimizer_rosenbrock();
+    test_optimizer_anisotropic_quadratic();
+    test_optimizer_linear();
     test_optimizer_saddle_point();
     test_optimizer_multiple_minima();
 
