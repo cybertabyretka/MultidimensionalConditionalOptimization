@@ -17,11 +17,11 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
         include:
           - os: windows-latest
-            output: mdo-windows.exe
+            output: cmdo-windows.exe
           - os: ubuntu-latest
-            output: mdo-linux
+            output: cmdo-linux
           - os: macos-latest
-            output: mdo-darwin
+            output: cmdo-darwin
 
     steps:
       - uses: actions/checkout@v4
@@ -62,26 +62,26 @@ jobs:
         shell: bash
         run: |
           echo "= list windows artifact ="
-          ls -la mdo-windows.exe
+          ls -la cmdo-windows.exe
 
       - name: Check Linux artifact
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           echo "= list linux artifact ="
-          ls -la mdo-linux
+          ls -la cmdo-linux
 
       - name: Check macOS artifact
         if: matrix.os == 'macos-latest'
         shell: bash
         run: |
           echo "= list macos artifact ="
-          ls -la mdo-darwin
+          ls -la cmdo-darwin
 
       - name: Upload Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            mdo-windows.exe
-            mdo-linux
-            mdo-darwin
+            cmdo-windows.exe
+            cmdo-linux
+            cmdo-darwin
