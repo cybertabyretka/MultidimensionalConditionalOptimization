@@ -10,6 +10,7 @@
 
 using Vec = Vector<double>;
 
+// f(x1, x2) = (x1 - 10)^2 + 100 * (x2 - 10)^2
 auto objective = [](const Vec& x) -> double {
     const double x1 = x[0];
     const double x2 = x[1];
@@ -27,6 +28,8 @@ LinearConstraint make_constraint(std::initializer_list<double> coeffs, double rh
 ProjectedGradientOptimizerConfig make_config() {
     ProjectedGradientOptimizerConfig cfg;
     cfg.problem.objective = objective;
+    // Constraints: -x1 + 3x2 <= 12, 2x1 + 5x2 <= 30, 3x1 + 2x2 <= 22, x1 - 3x2 <= 0,
+    //              2x1 + 5x2 >= 10, 5x1 + x2 >= 5, x1 >= 0, x2 >= 0
     cfg.linear_constraints = {
         make_constraint({-1.0, 3.0}, 12.0, false),
         make_constraint({2.0, 5.0}, 30.0, false),
@@ -37,6 +40,7 @@ ProjectedGradientOptimizerConfig make_config() {
         make_constraint({1.0, 0.0}, 0.0, true),
         make_constraint({0.0, 1.0}, 0.0, true)
     };
+    // Numeric configuration
     cfg.numeric.max_iter = 200;
     cfg.numeric.grad_tol = 1e-6;
     cfg.numeric.step_tol = 1e-10;
@@ -55,8 +59,8 @@ ProjectedGradientOptimizerConfig make_config() {
 
 int main() {
     std::cout << std::fixed << std::setprecision(10);
-
     ProjectedGradientOptimizer optimizer(make_config());
+    // Starting points for optimization
     std::vector<Vec> starts = {
         Vec{0.0, 0.0},
         Vec{1.0, 2.0},
@@ -67,18 +71,14 @@ int main() {
         Vec{1.0, 8.0},
         Vec{10.0, 10.0}
     };
-
     optimizer.optimize(starts, true);
-
     std::cout << "\nStationary points:\n";
     for (const auto& p : optimizer.get_stationary_points()) {
         std::cout << p.point << " -> f = " << p.value << '\n';
     }
-
     std::cout << "\nMinimum points:\n";
     for (const auto& p : optimizer.get_minimum_points()) {
         std::cout << p.point << " -> f = " << p.value << '\n';
     }
-
     return 0;
 }

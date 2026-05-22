@@ -21,16 +21,25 @@
 
 namespace {
 
+/// @brief Represents a halfspace defined by a normal vector and a right-hand side value.
 struct Halfspace {
     Vector<double> normal;
     double rhs{};
 };
 
+/// @brief Represents a linear constraint in a form suitable for projection and KKT checks.
 struct ConstraintRep {
     Vector<double> normal;
     double rhs{};
 };
 
+/**
+ * @brief Projects a point onto a halfspace defined by a linear constraint.
+ * @param y The point to be projected.
+ * @param h The halfspace representing the linear constraint.
+ * @return The projection of y onto the halfspace h.
+ * @throws InputOptimizationError If the halfspace has an invalid normal vector (zero vector).
+ */
 Vector<double> project_onto_halfspace(const Vector<double>& y, const Halfspace& h) {
     const double denom = h.normal.dot(h.normal);
     if (denom <= 0.0) {
@@ -45,6 +54,11 @@ Vector<double> project_onto_halfspace(const Vector<double>& y, const Halfspace& 
     return y - h.normal * (violation / denom);
 }
 
+/**
+ * @brief Converts a linear constraint into a halfspace representation.
+ * @param c The linear constraint to convert.
+ * @return The corresponding halfspace representation of the linear constraint.
+ */
 Halfspace make_halfspace_from_constraint(const LinearConstraint& c) {
     if (c.greater_equal) {
         return Halfspace{c.coefficients * -1.0, -c.rhs};
@@ -52,6 +66,11 @@ Halfspace make_halfspace_from_constraint(const LinearConstraint& c) {
     return Halfspace{c.coefficients, c.rhs};
 }
 
+/**
+ * @brief Converts a linear constraint into a representation suitable for KKT checks.
+ * @param c The linear constraint to convert.
+ * @return The corresponding representation for KKT checks.
+ */
 ConstraintRep to_constraint_rep(const LinearConstraint& c) {
     if (c.greater_equal) {
         return ConstraintRep{c.coefficients * -1.0, -c.rhs};
@@ -59,6 +78,12 @@ ConstraintRep to_constraint_rep(const LinearConstraint& c) {
     return ConstraintRep{c.coefficients, c.rhs};
 }
 
+/**
+ * @brief Collects all constraints into a single vector of representations.
+ * @param cfg The optimizer configuration.
+ * @param dim The dimension of the problem.
+ * @return A vector containing all constraint representations.
+ */
 std::vector<ConstraintRep> collect_constraints(const ProjectedGradientOptimizerConfig& cfg, size_t dim) {
     std::vector<ConstraintRep> constraints;
 
@@ -81,6 +106,13 @@ std::vector<ConstraintRep> collect_constraints(const ProjectedGradientOptimizerC
     return constraints;
 }
 
+/**
+ * @brief Identifies the indices of active constraints at a given point.
+ * @param constraints The vector of constraint representations.
+ * @param x The point at which to check constraint activity.
+ * @param tol The tolerance for determining constraint activity.
+ * @return A vector containing the indices of active constraints.
+ */
 std::vector<size_t> active_constraint_indices(
     const std::vector<ConstraintRep>& constraints,
     const Vector<double>& x,
@@ -96,6 +128,13 @@ std::vector<size_t> active_constraint_indices(
     return active;
 }
 
+/**
+ * @brief Checks if a point satisfies all constraints within a given tolerance.
+ * @param constraints The vector of constraint representations.
+ * @param x The point to check.
+ * @param tol The tolerance for constraint satisfaction.
+ * @return True if the point satisfies all constraints, false otherwise.
+ */
 bool satisfies_all_constraints(
     const std::vector<ConstraintRep>& constraints,
     const Vector<double>& x,
@@ -109,6 +148,13 @@ bool satisfies_all_constraints(
     return true;
 }
 
+/**
+ * @brief Builds the active constraint matrix from a list of indices.
+ * @param constraints The vector of constraint representations.
+ * @param indices The indices of active constraints.
+ * @param dim The dimension of the problem.
+ * @return The active constraint matrix.
+ */
 Matrix<double> build_active_matrix(
     const std::vector<ConstraintRep>& constraints,
     const std::vector<size_t>& indices,
@@ -124,6 +170,12 @@ Matrix<double> build_active_matrix(
     return A;
 }
 
+/**
+ * @brief Computes a basis for the nullspace of a matrix.
+ * @param A The matrix for which to compute the nullspace basis.
+ * @param tol The tolerance for determining the rank of the matrix.
+ * @return A vector containing the basis vectors for the nullspace.
+ */
 std::vector<Vector<double>> nullspace_basis(Matrix<double> A, double tol) {
     const size_t m = A.rows();
     const size_t n = A.cols();
@@ -193,6 +245,12 @@ std::vector<Vector<double>> nullspace_basis(Matrix<double> A, double tol) {
     return basis;
 }
 
+/**
+ * @brief Generates all subsets of a given size from a vector of items.
+ * @param items The vector of items from which to generate subsets.
+ * @param k The size of each subset to generate.
+ * @return A vector containing all subsets of the specified size.
+ */
 std::vector<std::vector<size_t>> generate_subsets(const std::vector<size_t>& items, size_t k) {
     std::vector<std::vector<size_t>> subsets;
     std::vector<size_t> current;
@@ -216,6 +274,14 @@ std::vector<std::vector<size_t>> generate_subsets(const std::vector<size_t>& ite
     return subsets;
 }
 
+/**
+ * @brief Checks if a point is a KKT minimum.
+ * @param objective The objective function.
+ * @param config The optimizer configuration.
+ * @param x The point to check.
+ * @param constraints The vector of constraint representations.
+ * @return True if the point is a KKT minimum, false otherwise.
+ */
 bool kkt_minimum_check(
     const std::function<double(const Vector<double>&)>& objective,
     const ProjectedGradientOptimizerConfig& config,
@@ -232,6 +298,7 @@ bool kkt_minimum_check(
 
     bool kkt_ok = false;
     if (active.empty()) {
+        // Unconstrained case: check if gradient is approximately zero
         kkt_ok = g.norm() <= config.numeric.grad_tol;
     } else {
         const size_t dim = x.size();
@@ -245,7 +312,7 @@ bool kkt_minimum_check(
                         N.at(row, col) = normal[row];
                     }
                 }
-
+                // Solve the KKT system for the current subset of active constraints
                 Matrix<double> G = N.transpose() * N;
                 Vector<double> rhs = -(N.transpose() * g);
 
@@ -270,22 +337,22 @@ bool kkt_minimum_check(
             }
         }
     }
-
+    // If KKT conditions are not satisfied, return false immediately
     if (!kkt_ok) {
         return false;
     }
-
+    // Check second-order sufficient conditions for optimality
     Matrix<double> H = numerical_hessian(objective, x, config.numeric.hessian_step);
     if (active.empty()) {
         return H.is_positive_definite();
     }
-
+    // For active constraints, check positive definiteness on the nullspace of the active constraint normals
     Matrix<double> A = build_active_matrix(constraints, active, x.size());
     std::vector<Vector<double>> basis = nullspace_basis(A, 1e-10);
     if (basis.empty()) {
         return true;
     }
-
+    // Form the matrix of basis vectors and compute the reduced Hessian
     Matrix<double> Z(x.size(), basis.size(), 0.0);
     for (size_t col = 0; col < basis.size(); ++col) {
         for (size_t row = 0; row < x.size(); ++row) {
